@@ -37,6 +37,7 @@ public class SuitModMenu implements Application.ActivityLifecycleCallbacks {
     private Activity        mActivity;
     private FrameLayout     mOverlay;
     private LinearLayout    mPanel;
+    private Button          mToggleBtn;
     private boolean         mVisible = false;
     private int[] mSelected = new int[SLOT_COUNT];
 
@@ -97,28 +98,47 @@ public class SuitModMenu implements Application.ActivityLifecycleCallbacks {
         return null;
     }
 
-    // Логика перетаскивания
-    View.OnTouchListener createDragListener() {
+    // ИСПРАВЛЕННЫЙ СЛУШАТЕЛЬ: теперь он сам открывает меню при клике
+    View.OnTouchListener createDragListener(View targetView, boolean isToggleButton) {
         return new View.OnTouchListener() {
             private float initialX, initialY;
             private int initialLeftMargin, initialTopMargin;
+            private boolean isDragging = false;
 
             @Override
             public boolean onTouch(View v, MotionEvent event) {
-                FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) v.getLayoutParams();
+                FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) targetView.getLayoutParams();
                 switch (event.getActionMasked()) {
                     case MotionEvent.ACTION_DOWN:
                         initialX = event.getRawX();
                         initialY = event.getRawY();
                         initialLeftMargin = params.leftMargin;
                         initialTopMargin = params.topMargin;
+                        isDragging = false;
                         return true;
+
                     case MotionEvent.ACTION_MOVE:
                         float deltaX = event.getRawX() - initialX;
                         float deltaY = event.getRawY() - initialY;
-                        params.leftMargin = initialLeftMargin + (int) deltaX;
-                        params.topMargin = initialTopMargin + (int) deltaY;
-                        v.setLayoutParams(params);
+                        
+                        // Если сдвинули больше чем на 15 пикселей, включаем перетаскивание
+                        if (!isDragging && (Math.abs(deltaX) > 15 || Math.abs(deltaY) > 15)) {
+                            isDragging = true;
+                        }
+                        
+                        if (isDragging) {
+                            params.leftMargin = initialLeftMargin + (int) deltaX;
+                            params.topMargin = initialTopMargin + (int) deltaY;
+                            targetView.setLayoutParams(params);
+                        }
+                        return true;
+
+                    case MotionEvent.ACTION_UP:
+                        // Если палец не двигался (это был тап) и это кнопка меню - открываем/закрываем
+                        if (!isDragging && isToggleButton) {
+                            mVisible = !mVisible;
+                            mPanel.setVisibility(mVisible ? View.VISIBLE : View.GONE);
+                        }
                         return true;
                 }
                 return false;
@@ -133,18 +153,20 @@ public class SuitModMenu implements Application.ActivityLifecycleCallbacks {
         int screenWidth = dm.widthPixels;
 
         // Кнопка 🕷
-        Button toggle = new Button(a);
-        toggle.setText("🕷");
-        toggle.setTextSize(18);
-        style(toggle, 0xCC1A1A2E, 0xFFE94560);
-        toggle.setAllCaps(false);
+        mToggleBtn = new Button(a);
+        mToggleBtn.setText("🕷");
+        mToggleBtn.setTextSize(18);
+        style(mToggleBtn, 0xCC1A1A2E, 0xFFE94560);
+        mToggleBtn.setAllCaps(false);
 
         FrameLayout.LayoutParams toggleLP = new FrameLayout.LayoutParams((int)(50*dp), (int)(50*dp));
-        toggleLP.gravity = Gravity.TOP | Gravity.START; // Используем START для легкого перетаскивания
+        toggleLP.gravity = Gravity.TOP | Gravity.START;
         toggleLP.topMargin  = (int)(80*dp);
-        toggleLP.leftMargin = screenWidth - (int)(50*dp) - (int)(8*dp); // Изначально справа
-        toggle.setLayoutParams(toggleLP);
-        toggle.setOnTouchListener(createDragListener()); // Вешаем перетаскивание на кнопку
+        toggleLP.leftMargin = screenWidth - (int)(50*dp) - (int)(16*dp);
+        mToggleBtn.setLayoutParams(toggleLP);
+        
+        // Вешаем наш умный слушатель (таскает + открывает)
+        mToggleBtn.setOnTouchListener(createDragListener(mToggleBtn, true));
 
         // Панель
         mPanel = new LinearLayout(a);
@@ -157,12 +179,14 @@ public class SuitModMenu implements Application.ActivityLifecycleCallbacks {
 
         FrameLayout.LayoutParams panelLP = new FrameLayout.LayoutParams((int)(220*dp), ViewGroup.LayoutParams.WRAP_CONTENT);
         panelLP.gravity = Gravity.TOP | Gravity.START;
-        panelLP.topMargin  = (int)(135*dp);
-        panelLP.leftMargin = screenWidth - (int)(220*dp) - (int)(8*dp); // Изначально справа
+        panelLP.topMargin  = (int)(140*dp);
+        panelLP.leftMargin = screenWidth - (int)(220*dp) - (int)(16*dp);
         mPanel.setLayoutParams(panelLP);
 
+        // Заголовок (за него тоже можно таскать)
         TextView title = label(a, "🕷 Костюм Конструктор", 14, 0xFFE94560);
-        title.setOnTouchListener(createDragListener()); // Вешаем перетаскивание на заголовок панели
+        title.setPadding(0, (int)(8*dp), 0, (int)(8*dp));
+        title.setOnTouchListener(createDragListener(mPanel, false));
         mPanel.addView(title);
         mPanel.addView(divider(a, dp));
 
@@ -189,15 +213,10 @@ public class SuitModMenu implements Application.ActivityLifecycleCallbacks {
         mOverlay.setTag("suitmod_overlay");
         FrameLayout.LayoutParams overlayLP = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         mOverlay.setLayoutParams(overlayLP);
-        mOverlay.addView(toggle);
+        mOverlay.addView(mToggleBtn);
         mOverlay.addView(mPanel);
 
-        // Обычный клик для открытия/закрытия
-        toggle.setOnClickListener(v -> {
-            mVisible = !mVisible;
-            mPanel.setVisibility(mVisible ? View.VISIBLE : View.GONE);
-        });
-
+        // УБРАН mToggleBtn.setOnClickListener, чтобы не было конфликтов
         root.addView(mOverlay);
     }
 
