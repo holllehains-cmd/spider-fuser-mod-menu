@@ -1,0 +1,357 @@
+package com.suitmod;
+
+import android.app.Activity;
+import android.app.Application;
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.DisplayMetrics;
+import android.util.Log;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
+import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+
+import java.lang.reflect.Method;
+import java.util.WeakHashMap;
+
+public class SuitModMenu implements Application.ActivityLifecycleCallbacks {
+
+    // ── SharedPreferences keys ────────────────────────────────────────
+    static final String PREFS      = "suitmod";
+    static final String KEY_HEAD   = "sel_head";
+    static final String KEY_UPPER  = "sel_upper";
+    static final String KEY_LOWER  = "sel_lower";
+    static final String KEY_SHOES  = "sel_shoes";
+    static final String KEY_OPEN   = "menu_open";
+    static final String TAG        = "SuitMod";
+
+    // Suit part slot labels visible in UI
+    // Indices map to SuitAttachments array order discovered in metadata
+    // HEAD=0  UPPER=1  LOWER=2  SHOES=3  (adjust if game differs)
+    static final String[] SLOT_LABELS = { "Голова", "Верх", "Низ", "Кроссовки" };
+    static final String[] SLOT_KEYS   = { KEY_HEAD, KEY_UPPER, KEY_LOWER, KEY_SHOES };
+    static final int      SLOT_COUNT  = 4;
+
+    // How many suits exist - read from SuitHolder at runtime; hardcode fallback
+    static final int MAX_SUITS = 40;
+
+    private Activity        mActivity;
+    private FrameLayout     mOverlay;
+    private LinearLayout    mPanel;
+    private boolean         mVisible = false;
+    private final Handler   mHandler = new Handler(Looper.getMainLooper());
+
+    // Current selection per slot
+    private int[] mSelected = new int[SLOT_COUNT];
+
+    // ── Installer ─────────────────────────────────────────────────────
+    public static class Installer implements Application.ActivityLifecycleCallbacks {
+        private final WeakHashMap<Activity, SuitModMenu> mInstalled = new WeakHashMap<>();
+
+        @Override
+        public void onActivityCreated(Activity a, Bundle b) {
+            if (mInstalled.containsKey(a)) return;
+            SuitModMenu menu = new SuitModMenu();
+            menu.attach(a);
+            mInstalled.put(a, menu);
+        }
+
+        @Override public void onActivityStarted(Activity a) {}
+        @Override public void onActivityResumed(Activity a) {}
+        @Override public void onActivityPaused(Activity a) {}
+        @Override public void onActivityStopped(Activity a) {}
+        @Override public void onActivitySaveInstanceState(Activity a, Bundle b) {}
+        @Override public void onActivityDestroyed(Activity a) { mInstalled.remove(a); }
+    }
+
+    // ── Attach to activity ────────────────────────────────────────────
+    void attach(Activity a) {
+        mActivity = a;
+        a.getWindow().getDecorView().getViewTreeObserver()
+            .addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
+                boolean done = false;
+                @Override public void onGlobalLayout() {
+                    if (done) return;
+                    ViewGroup root = findRoot(a);
+                    if (root == null) return;
+                    done = true;
+                    loadPrefs(a);
+                    buildOverlay(a, root);
+                    Log.d(TAG, "Overlay attached");
+                }
+            });
+    }
+
+    // ── Find Unity root view ──────────────────────────────────────────
+    ViewGroup findRoot(Activity a) {
+        ViewGroup dec = (ViewGroup) a.getWindow().getDecorView();
+        return findUnityView(dec);
+    }
+
+    ViewGroup findUnityView(ViewGroup vg) {
+        for (int i = 0; i < vg.getChildCount(); i++) {
+            View v = vg.getChildAt(i);
+            String name = v.getClass().getSimpleName();
+            if (name.contains("Unity") || name.contains("GL") || name.contains("Surface")) {
+                return vg; // return parent so we can addView to it
+            }
+            if (v instanceof ViewGroup) {
+                ViewGroup r = findUnityView((ViewGroup) v);
+                if (r != null) return r;
+            }
+        }
+        return (ViewGroup) a.getWindow().getDecorView();
+    }
+
+    // ── Build overlay UI ─────────────────────────────────────────────
+    void buildOverlay(Activity a, ViewGroup root) {
+        DisplayMetrics dm = new DisplayMetrics();
+        a.getWindowManager().getDefaultDisplay().getMetrics(dm);
+        float dp = dm.density;
+
+        // Toggle button
+        Button toggle = new Button(a);
+        toggle.setText("🕷");
+        toggle.setTextSize(18);
+        style(toggle, 0xCC1A1A2E, 0xFFE94560);
+        toggle.setAllCaps(false);
+
+        FrameLayout.LayoutParams toggleLP = new FrameLayout.LayoutParams(
+            (int)(50*dp), (int)(50*dp));
+        toggleLP.gravity = Gravity.TOP | Gravity.END;
+        toggleLP.topMargin  = (int)(80*dp);
+        toggleLP.rightMargin = (int)(8*dp);
+        toggle.setLayoutParams(toggleLP);
+
+        // Panel
+        mPanel = new LinearLayout(a);
+        mPanel.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable panelBg = new GradientDrawable();
+        panelBg.setColor(0xEE0D0D1A);
+        panelBg.setCornerRadius(12*dp);
+        mPanel.setBackground(panelBg);
+        mPanel.setPadding((int)(12*dp),(int)(12*dp),(int)(12*dp),(int)(12*dp));
+
+        FrameLayout.LayoutParams panelLP = new FrameLayout.LayoutParams(
+            (int)(220*dp), ViewGroup.LayoutParams.WRAP_CONTENT);
+        panelLP.gravity = Gravity.TOP | Gravity.END;
+        panelLP.topMargin  = (int)(135*dp);
+        panelLP.rightMargin = (int)(8*dp);
+        mPanel.setLayoutParams(panelLP);
+
+        // Title
+        TextView title = label(a, "🕷 Костюм Конструктор", 14, 0xFFE94560);
+        mPanel.addView(title);
+
+        // Divider
+        mPanel.addView(divider(a, dp));
+
+        // Per-slot rows
+        for (int slot = 0; slot < SLOT_COUNT; slot++) {
+            mPanel.addView(buildSlotRow(a, slot, dp));
+        }
+
+        // Divider
+        mPanel.addView(divider(a, dp));
+
+        // Apply button
+        Button apply = new Button(a);
+        apply.setText("✅ Применить");
+        apply.setTextSize(12);
+        apply.setAllCaps(false);
+        style(apply, 0xFF16213E, 0xFF0F3460);
+        final int[] selectedSnap = mSelected.clone();
+        apply.setOnClickListener(v -> applyCustomSuit(a));
+
+        LinearLayout.LayoutParams applyLP = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, (int)(40*dp));
+        applyLP.topMargin = (int)(8*dp);
+        apply.setLayoutParams(applyLP);
+        mPanel.addView(apply);
+
+        mPanel.setVisibility(View.GONE);
+
+        // Overlay frame
+        mOverlay = new FrameLayout(a);
+        mOverlay.setTag("suitmod_overlay");
+        FrameLayout.LayoutParams overlayLP = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT);
+        mOverlay.setLayoutParams(overlayLP);
+        mOverlay.addView(toggle);
+        mOverlay.addView(mPanel);
+
+        toggle.setOnClickListener(v -> {
+            mVisible = !mVisible;
+            mPanel.setVisibility(mVisible ? View.VISIBLE : View.GONE);
+        });
+
+        root.addView(mOverlay);
+    }
+
+    // ── Slot row: label + prev/next buttons + index display ───────────
+    View buildSlotRow(Activity a, int slot, float dp) {
+        LinearLayout row = new LinearLayout(a);
+        row.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams rowLP = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rowLP.topMargin = (int)(6*dp);
+        row.setLayoutParams(rowLP);
+
+        // Slot name
+        TextView slotLabel = label(a, SLOT_LABELS[slot], 11, 0xFF8899AA);
+        row.addView(slotLabel);
+
+        // Controls row
+        LinearLayout ctrl = new LinearLayout(a);
+        ctrl.setOrientation(LinearLayout.HORIZONTAL);
+        ctrl.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button prev = new Button(a);
+        prev.setText("◀");
+        prev.setTextSize(12);
+        prev.setAllCaps(false);
+        style(prev, 0xFF16213E, 0xFFE94560);
+        LinearLayout.LayoutParams btnLP = new LinearLayout.LayoutParams(
+            (int)(36*dp), (int)(32*dp));
+        prev.setLayoutParams(btnLP);
+
+        final TextView indexTV = new TextView(a);
+        indexTV.setText(String.valueOf(mSelected[slot]));
+        indexTV.setTextColor(0xFFFFFFFF);
+        indexTV.setTextSize(13);
+        indexTV.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams idxLP = new LinearLayout.LayoutParams(
+            0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        indexTV.setLayoutParams(idxLP);
+
+        Button next = new Button(a);
+        next.setText("▶");
+        next.setTextSize(12);
+        next.setAllCaps(false);
+        style(next, 0xFF16213E, 0xFFE94560);
+        next.setLayoutParams(btnLP);
+
+        prev.setOnClickListener(v -> {
+            mSelected[slot] = Math.max(0, mSelected[slot] - 1);
+            indexTV.setText(String.valueOf(mSelected[slot]));
+            savePrefs(a);
+            previewSlot(slot);
+        });
+
+        next.setOnClickListener(v -> {
+            mSelected[slot] = Math.min(MAX_SUITS - 1, mSelected[slot] + 1);
+            indexTV.setText(String.valueOf(mSelected[slot]));
+            savePrefs(a);
+            previewSlot(slot);
+        });
+
+        ctrl.addView(prev);
+        ctrl.addView(indexTV);
+        ctrl.addView(next);
+        row.addView(ctrl);
+
+        return row;
+    }
+
+    // ── Apply custom suit via UnitySendMessage ────────────────────────
+    // SuitHolder.TransferAccessory(slotIndex, suitIndex) → called 4 times
+    // If UnitySendMessage doesn't work directly, fall back to reflection
+    void applyCustomSuit(Activity a) {
+        try {
+            Class<?> up = Class.forName("com.unity3d.player.UnityPlayer");
+            Method send = up.getMethod("UnitySendMessage", String.class, String.class, String.class);
+
+            for (int slot = 0; slot < SLOT_COUNT; slot++) {
+                // Message format: "slot:index"
+                // SuitHolder.TransferAccessory reads this string
+                String msg = slot + ":" + mSelected[slot];
+                send.invoke(null, "SuitHolder", "TransferAccessory", msg);
+                Log.d(TAG, "UnitySendMessage SuitHolder TransferAccessory " + msg);
+            }
+
+            // Also try EquipSuitStudio to trigger re-render
+            send.invoke(null, "SuitHolder", "EquipSuitStudio", "");
+
+        } catch (Exception e) {
+            Log.e(TAG, "UnitySendMessage failed: " + e.getMessage());
+            // Fallback: save to prefs and game reads on next load
+            Log.d(TAG, "Saved to prefs; will apply on next SuitHolder init");
+        }
+    }
+
+    // ── Preview single slot live ──────────────────────────────────────
+    void previewSlot(int slot) {
+        try {
+            Class<?> up = Class.forName("com.unity3d.player.UnityPlayer");
+            Method send = up.getMethod("UnitySendMessage", String.class, String.class, String.class);
+            String msg = slot + ":" + mSelected[slot];
+            send.invoke(null, "SuitHolder", "TransferAccessory", msg);
+        } catch (Exception ignored) {}
+    }
+
+    // ── Prefs ─────────────────────────────────────────────────────────
+    void loadPrefs(Activity a) {
+        SharedPreferences p = a.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        mSelected[0] = p.getInt(KEY_HEAD,  0);
+        mSelected[1] = p.getInt(KEY_UPPER, 0);
+        mSelected[2] = p.getInt(KEY_LOWER, 0);
+        mSelected[3] = p.getInt(KEY_SHOES, 0);
+    }
+
+    void savePrefs(Activity a) {
+        SharedPreferences.Editor ed = a.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
+        ed.putInt(KEY_HEAD,  mSelected[0]);
+        ed.putInt(KEY_UPPER, mSelected[1]);
+        ed.putInt(KEY_LOWER, mSelected[2]);
+        ed.putInt(KEY_SHOES, mSelected[3]);
+        ed.apply();
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────
+    void style(Button b, int bg, int stroke) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(bg);
+        d.setStroke(2, stroke);
+        d.setCornerRadius(8);
+        b.setBackground(d);
+        b.setTextColor(0xFFFFFFFF);
+    }
+
+    TextView label(Activity a, String text, int sp, int color) {
+        TextView tv = new TextView(a);
+        tv.setText(text);
+        tv.setTextColor(color);
+        tv.setTextSize(sp);
+        return tv;
+    }
+
+    View divider(Activity a, float dp) {
+        View v = new View(a);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 1);
+        lp.topMargin = lp.bottomMargin = (int)(6*dp);
+        v.setLayoutParams(lp);
+        v.setBackgroundColor(0x44E94560);
+        return v;
+    }
+
+    // ── Unused lifecycle ──────────────────────────────────────────────
+    @Override public void onActivityCreated(Activity a, Bundle b) {}
+    @Override public void onActivityStarted(Activity a) {}
+    @Override public void onActivityResumed(Activity a) {}
+    @Override public void onActivityPaused(Activity a) {}
+    @Override public void onActivityStopped(Activity a) {}
+    @Override public void onActivitySaveInstanceState(Activity a, Bundle b) {}
+    @Override public void onActivityDestroyed(Activity a) {}
+}
