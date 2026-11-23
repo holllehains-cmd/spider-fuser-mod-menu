@@ -4,14 +4,12 @@ import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
@@ -81,7 +79,7 @@ public class SuitModMenu implements Application.ActivityLifecycleCallbacks {
     ViewGroup findRoot(Activity a) {
         ViewGroup dec = (ViewGroup) a.getWindow().getDecorView();
         ViewGroup result = findUnityView(dec);
-        return result != null ? result : dec; // Если не нашли Unity, возвращаем корень
+        return result != null ? result : dec;
     }
 
     ViewGroup findUnityView(ViewGroup vg) {
@@ -96,14 +94,45 @@ public class SuitModMenu implements Application.ActivityLifecycleCallbacks {
                 if (r != null) return r;
             }
         }
-        return null; // Исправлено: возвращаем null вместо несуществующей 'a'
+        return null;
+    }
+
+    // Логика перетаскивания
+    View.OnTouchListener createDragListener() {
+        return new View.OnTouchListener() {
+            private float initialX, initialY;
+            private int initialLeftMargin, initialTopMargin;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) v.getLayoutParams();
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        initialX = event.getRawX();
+                        initialY = event.getRawY();
+                        initialLeftMargin = params.leftMargin;
+                        initialTopMargin = params.topMargin;
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        float deltaX = event.getRawX() - initialX;
+                        float deltaY = event.getRawY() - initialY;
+                        params.leftMargin = initialLeftMargin + (int) deltaX;
+                        params.topMargin = initialTopMargin + (int) deltaY;
+                        v.setLayoutParams(params);
+                        return true;
+                }
+                return false;
+            }
+        };
     }
 
     void buildOverlay(Activity a, ViewGroup root) {
         DisplayMetrics dm = new DisplayMetrics();
         a.getWindowManager().getDefaultDisplay().getMetrics(dm);
         float dp = dm.density;
+        int screenWidth = dm.widthPixels;
 
+        // Кнопка 🕷
         Button toggle = new Button(a);
         toggle.setText("🕷");
         toggle.setTextSize(18);
@@ -111,11 +140,13 @@ public class SuitModMenu implements Application.ActivityLifecycleCallbacks {
         toggle.setAllCaps(false);
 
         FrameLayout.LayoutParams toggleLP = new FrameLayout.LayoutParams((int)(50*dp), (int)(50*dp));
-        toggleLP.gravity = Gravity.TOP | Gravity.END;
+        toggleLP.gravity = Gravity.TOP | Gravity.START; // Используем START для легкого перетаскивания
         toggleLP.topMargin  = (int)(80*dp);
-        toggleLP.rightMargin = (int)(8*dp);
+        toggleLP.leftMargin = screenWidth - (int)(50*dp) - (int)(8*dp); // Изначально справа
         toggle.setLayoutParams(toggleLP);
+        toggle.setOnTouchListener(createDragListener()); // Вешаем перетаскивание на кнопку
 
+        // Панель
         mPanel = new LinearLayout(a);
         mPanel.setOrientation(LinearLayout.VERTICAL);
         GradientDrawable panelBg = new GradientDrawable();
@@ -125,12 +156,13 @@ public class SuitModMenu implements Application.ActivityLifecycleCallbacks {
         mPanel.setPadding((int)(12*dp),(int)(12*dp),(int)(12*dp),(int)(12*dp));
 
         FrameLayout.LayoutParams panelLP = new FrameLayout.LayoutParams((int)(220*dp), ViewGroup.LayoutParams.WRAP_CONTENT);
-        panelLP.gravity = Gravity.TOP | Gravity.END;
+        panelLP.gravity = Gravity.TOP | Gravity.START;
         panelLP.topMargin  = (int)(135*dp);
-        panelLP.rightMargin = (int)(8*dp);
+        panelLP.leftMargin = screenWidth - (int)(220*dp) - (int)(8*dp); // Изначально справа
         mPanel.setLayoutParams(panelLP);
 
         TextView title = label(a, "🕷 Костюм Конструктор", 14, 0xFFE94560);
+        title.setOnTouchListener(createDragListener()); // Вешаем перетаскивание на заголовок панели
         mPanel.addView(title);
         mPanel.addView(divider(a, dp));
 
@@ -160,6 +192,7 @@ public class SuitModMenu implements Application.ActivityLifecycleCallbacks {
         mOverlay.addView(toggle);
         mOverlay.addView(mPanel);
 
+        // Обычный клик для открытия/закрытия
         toggle.setOnClickListener(v -> {
             mVisible = !mVisible;
             mPanel.setVisibility(mVisible ? View.VISIBLE : View.GONE);
@@ -300,4 +333,4 @@ public class SuitModMenu implements Application.ActivityLifecycleCallbacks {
     @Override public void onActivityStopped(Activity a) {}
     @Override public void onActivitySaveInstanceState(Activity a, Bundle b) {}
     @Override public void onActivityDestroyed(Activity a) {}
-                   }
+}
