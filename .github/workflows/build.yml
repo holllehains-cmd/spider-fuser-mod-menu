@@ -17,28 +17,19 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Licenses
-        run: |
-          yes | sdkmanager --licenses || true
-
-      - name: Install Build Tools
-        run: |
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
-
       - name: Compile Java sources
         run: |
           mkdir -p build/classes
+          # Используем предустановленный Android SDK
           javac -source 8 -target 8 \
-            -cp $ANDROID_HOME/platforms/android-34/android.jar \
+            -cp /usr/local/lib/android/sdk/platforms/android-34/android.jar \
             -d build/classes \
             src/com/suitmod/*.java
 
       - name: Convert to DEX with d8
         run: |
-          $ANDROID_HOME/build-tools/34.0.0/d8 \
+          # Берем d8 из предустановленных build-tools
+          /usr/local/lib/android/sdk/build-tools/34.0.0/d8 \
             --release \
             --min-api 21 \
             --output build/ \
