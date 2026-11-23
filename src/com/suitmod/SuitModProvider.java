@@ -2,12 +2,10 @@ package com.suitmod;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
+import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
 import android.app.Application;
-import android.app.Activity;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
 
 public class SuitModProvider extends ContentProvider {
@@ -16,8 +14,21 @@ public class SuitModProvider extends ContentProvider {
     @Override
     public boolean onCreate() {
         Log.d(TAG, "SuitModProvider.onCreate");
-        Application app = (Application) getContext().getApplicationContext();
-        app.registerActivityLifecycleCallbacks(new SuitModMenu.Installer());
+        try {
+            Context ctx = getContext();
+            if (ctx != null) {
+                Context appCtx = ctx.getApplicationContext();
+                if (appCtx instanceof Application) {
+                    ((Application) appCtx).registerActivityLifecycleCallbacks(new SuitModMenu.Installer());
+                } else if (ctx instanceof Application) {
+                    ((Application) ctx).registerActivityLifecycleCallbacks(new SuitModMenu.Installer());
+                } else {
+                    Log.e(TAG, "Context is not Application, cannot register callbacks");
+                }
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to install menu", t);
+        }
         return true;
     }
 
