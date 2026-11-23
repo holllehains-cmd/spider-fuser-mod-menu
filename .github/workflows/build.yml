@@ -20,16 +20,24 @@ jobs:
       - name: Compile Java sources
         run: |
           mkdir -p build/classes
-          # Используем предустановленный Android SDK
+          echo "=== Проверка файлов в папке ==="
+          ls -la src/com/suitmod/
+          echo "=== Путь к android.jar ==="
+          find $ANDROID_HOME/platforms -name "android.jar" | head -1
+          
+          # Компилируем (используем android-33)
           javac -source 8 -target 8 \
-            -cp /usr/local/lib/android/sdk/platforms/android-34/android.jar \
+            -cp $ANDROID_HOME/platforms/android-33/android.jar \
             -d build/classes \
             src/com/suitmod/*.java
 
       - name: Convert to DEX with d8
         run: |
-          # Берем d8 из предустановленных build-tools
-          /usr/local/lib/android/sdk/build-tools/34.0.0/d8 \
+          echo "=== Путь к d8 ==="
+          find $ANDROID_HOME/build-tools -name "d8" | head -1
+          
+          # Собираем
+          $ANDROID_HOME/build-tools/33.0.0/d8 \
             --release \
             --min-api 21 \
             --output build/ \
